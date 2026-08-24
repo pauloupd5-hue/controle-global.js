@@ -11,8 +11,16 @@
         INTERVALO: 30000,
         // Se o Google ficar temporariamente indisponível,
         // mantém o último estado conhecido.
-        MANTER_ULTIMO_ESTADO_EM_ERRO: true
+        MANTER_ULTIMO_ESTADO_EM_ERRO: true,
+        // Só pra confirmar no console qual versão do arquivo está
+        // realmente rodando (ajuda a diagnosticar cache do jsDelivr).
+        VERSAO: "2.1-com-interceptacao-debug"
     };
+
+    console.log(
+        "%c[CONTROLE GLOBAL] Versão carregada: " + CONFIG.VERSAO,
+        "color: #00bcd4; font-weight: bold; font-size: 13px; background:#000; padding:2px 6px; border-radius:3px;"
+    );
 
     // =========================================================
     // ESTADO
@@ -196,7 +204,14 @@
     //  faltava por completo na versão anterior)
     // =========================================================
 
-    function bloquearChamada() {
+    let contadorBloqueios = 0;
+
+    function bloquearChamada(mecanismo) {
+        contadorBloqueios++;
+        console.warn(
+            "%c[CONTROLE GLOBAL] 🚫 Chamada bloqueada #" + contadorBloqueios + " (" + mecanismo + ")",
+            "color: #ff5252; font-weight: bold;"
+        );
         mostrarAviso();
     }
 
@@ -205,7 +220,7 @@
     window.setTimeout = function (fn, delay, ...args) {
         if (typeof fn !== "function") return _setTimeout(fn, delay, ...args);
         return _setTimeout(function () {
-            if (!podeExecutar()) { bloquearChamada(); return; }
+            if (!podeExecutar()) { bloquearChamada("setTimeout"); return; }
             fn(...args);
         }, delay);
     };
@@ -215,7 +230,7 @@
     window.setInterval = function (fn, delay, ...args) {
         if (typeof fn !== "function") return _setInterval(fn, delay, ...args);
         return _setInterval(function () {
-            if (!podeExecutar()) { bloquearChamada(); return; }
+            if (!podeExecutar()) { bloquearChamada("setInterval"); return; }
             fn(...args);
         }, delay);
     };
@@ -225,7 +240,7 @@
         const _raf = window.requestAnimationFrame.bind(window);
         window.requestAnimationFrame = function (fn) {
             return _raf(function (ts) {
-                if (!podeExecutar()) { bloquearChamada(); return; }
+                if (!podeExecutar()) { bloquearChamada("requestAnimationFrame"); return; }
                 fn(ts);
             });
         };
@@ -236,7 +251,7 @@
         const _MutationObserver = window.MutationObserver;
         function ControleGlobalMutationObserver(callback) {
             return new _MutationObserver(function (mutations, observer) {
-                if (!podeExecutar()) { bloquearChamada(); return; }
+                if (!podeExecutar()) { bloquearChamada("MutationObserver"); return; }
                 callback(mutations, observer);
             });
         }
@@ -249,7 +264,7 @@
         const _fetch = window.fetch.bind(window);
         window.fetch = function (...args) {
             if (!podeExecutar()) {
-                bloquearChamada();
+                bloquearChamada("fetch");
                 return Promise.reject(new Error("[CONTROLE GLOBAL] Bloqueado (script inativo)."));
             }
             return _fetch(...args);
@@ -261,7 +276,7 @@
         const _send = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function (...args) {
             if (!podeExecutar()) {
-                bloquearChamada();
+                bloquearChamada("XMLHttpRequest.send");
                 return;
             }
             return _send.apply(this, args);
@@ -280,7 +295,7 @@
             const ehChamadaDoProprioControlador = url.indexOf("docs.google.com/spreadsheets/d/" + CONFIG.SHEET_ID) !== -1;
 
             if (!ehChamadaDoProprioControlador && !podeExecutar()) {
-                bloquearChamada();
+                bloquearChamada("GM_xmlhttpRequest -> " + url);
                 return;
             }
             return _gmxhr(detalhes);
