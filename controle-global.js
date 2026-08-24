@@ -14,7 +14,7 @@
         MANTER_ULTIMO_ESTADO_EM_ERRO: true,
         // Só pra confirmar no console qual versão do arquivo está
         // realmente rodando (ajuda a diagnosticar cache do jsDelivr).
-        VERSAO: "2.1-com-interceptacao-debug"
+        VERSAO: "2.2-fail-open-ate-confirmar"
     };
 
     console.log(
@@ -160,7 +160,8 @@
                     mostrarAviso();
                     console.log("[CONTROLE GLOBAL] Usando último estado persistido: INATIVO");
                 }
-                // Se não há nada persistido, permanece bloqueado (fail-safe padrão).
+                // Se não há nada persistido, permanece SEM confirmação
+                // (não confirmado != confirmado inativo — ver deveBloquear()).
             }
             // Se já havia um estado confirmado nesta sessão, mantém como está.
         } else {
@@ -193,15 +194,33 @@
 
     // =========================================================
     // VERIFICAR SE PODE EXECUTAR
+    // (API pública — usada pelos SEUS scripts pra decidir se rodam.
+    //  Fail-closed: só roda depois de confirmação positiva de Ativo.
+    //  Isso é seguro porque essa checagem só é chamada dentro de
+    //  cliques/intervalos do próprio script, nunca no primeiro
+    //  instante de carregamento da página.)
     // =========================================================
     function podeExecutar() {
         return estadoConfirmado === true && ativo === true;
     }
 
     // =========================================================
+    // VERIFICAR SE DEVE BLOQUEAR CHAMADAS DE REDE/TIMER DA PÁGINA
+    // (uso interno — só pelos interceptadores abaixo.
+    //  Fail-OPEN enquanto não há confirmação: só bloqueia quando já
+    //  temos confirmação EXPLÍCITA de Inativo. Isso evita que o
+    //  instante entre o carregamento da página e a primeira resposta
+    //  do Google Sheets derrube chamadas de rede que não são nem do
+    //  seu script — ex: o próprio ClickUp, ou o painel administrativo
+    //  sendo usado manualmente por uma pessoa nesse meio tempo.)
+    // =========================================================
+    function deveBloquear() {
+        return estadoConfirmado === true && ativo === false;
+    }
+
+    // =========================================================
     // INTERCEPTAÇÃO DOS MECANISMOS DE AUTOMAÇÃO
-    // (isto é o que efetivamente bloqueia os scripts quando B1 = Inativo;
-    //  faltava por completo na versão anterior)
+    // (isto é o que efetivamente bloqueia os scripts quando B1 = Inativo)
     // =========================================================
 
     let contadorBloqueios = 0;
@@ -220,7 +239,7 @@
     window.setTimeout = function (fn, delay, ...args) {
         if (typeof fn !== "function") return _setTimeout(fn, delay, ...args);
         return _setTimeout(function () {
-            if (!podeExecutar()) { bloquearChamada("setTimeout"); return; }
+            if (deveBloquear()) { bloquearChamada("setTimeout"); return; }
             fn(...args);
         }, delay);
     };
@@ -230,7 +249,7 @@
     window.setInterval = function (fn, delay, ...args) {
         if (typeof fn !== "function") return _setInterval(fn, delay, ...args);
         return _setInterval(function () {
-            if (!podeExecutar()) { bloquearChamada("setInterval"); return; }
+            if (deveBloquear()) { bloquearChamada("setInterval"); return; }
             fn(...args);
         }, delay);
     };
@@ -240,7 +259,7 @@
         const _raf = window.requestAnimationFrame.bind(window);
         window.requestAnimationFrame = function (fn) {
             return _raf(function (ts) {
-                if (!podeExecutar()) { bloquearChamada("requestAnimationFrame"); return; }
+                if (deveBloquear()) { bloquearChamada("requestAnimationFrame"); return; }
                 fn(ts);
             });
         };
@@ -251,7 +270,7 @@
         const _MutationObserver = window.MutationObserver;
         function ControleGlobalMutationObserver(callback) {
             return new _MutationObserver(function (mutations, observer) {
-                if (!podeExecutar()) { bloquearChamada("MutationObserver"); return; }
+                if (deveBloquear()) { bloquearChamada("MutationObserver"); return; }
                 callback(mutations, observer);
             });
         }
@@ -263,7 +282,7 @@
     if (typeof window.fetch === "function") {
         const _fetch = window.fetch.bind(window);
         window.fetch = function (...args) {
-            if (!podeExecutar()) {
+            if (deveBloquear()) {
                 bloquearChamada("fetch");
                 return Promise.reject(new Error("[CONTROLE GLOBAL] Bloqueado (script inativo)."));
             }
@@ -275,7 +294,7 @@
     if (typeof XMLHttpRequest !== "undefined" && XMLHttpRequest.prototype.send) {
         const _send = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function (...args) {
-            if (!podeExecutar()) {
+            if (deveBloquear()) {
                 bloquearChamada("XMLHttpRequest.send");
                 return;
             }
@@ -294,7 +313,7 @@
             const url = detalhes && detalhes.url ? String(detalhes.url) : "";
             const ehChamadaDoProprioControlador = url.indexOf("docs.google.com/spreadsheets/d/" + CONFIG.SHEET_ID) !== -1;
 
-            if (!ehChamadaDoProprioControlador && !podeExecutar()) {
+            if (!ehChamadaDoProprioControlador && deveBloquear()) {
                 bloquearChamada("GM_xmlhttpRequest -> " + url);
                 return;
             }
