@@ -1,29 +1,37 @@
+// ==UserScript==
+// @name         Controle Global Tampermonkey
+// @namespace    Saynity
+// @version      1.0.0
+// @description  Controle global de ativação dos Tampermonkeys através do Google Sheets
+// @grant        GM_xmlhttpRequest
+// @connect      docs.google.com
+// ==/UserScript==
+
+
 // ============================================================
 // CONTROLE GLOBAL DOS TAMPERMONKEYS
 // ============================================================
 
 (function () {
+
     "use strict";
 
-    const CONFIG = {
 
-        // =====================================================
-        // PLANILHA
-        // =====================================================
+    // =========================================================
+    // CONFIGURAÇÃO
+    // =========================================================
+
+    const CONFIG = {
 
         SHEET_ID:
             "1f7deYaMpiG9BSBv89Kd2Bus7mFawv6coudltgSqQZx4",
 
         GID: "0",
 
-        // =====================================================
-        // CONFIGURAÇÕES
-        // =====================================================
-
-        // Verifica a planilha a cada 30 segundos
+        // 30 segundos
         INTERVALO: 30000,
 
-        // Se Google/internet falhar temporariamente,
+        // Se o Google ficar temporariamente indisponível,
         // mantém o último estado conhecido.
         MANTER_ULTIMO_ESTADO_EM_ERRO: true
 
@@ -34,13 +42,18 @@
     // ESTADO
     // =========================================================
 
-    // Começa BLOQUEADO.
-    // Só libera depois que confirmar "Ativo" na planilha.
+    // Começa bloqueado.
     let ativo = false;
 
+    // Só libera depois da primeira confirmação.
     let estadoConfirmado = false;
 
     let verificando = false;
+
+
+    // =========================================================
+    // AVISO
+    // =========================================================
 
     const AVISO_KEY =
         "__CONTROLE_GLOBAL_TAMPERMONKEY__";
@@ -50,7 +63,7 @@
     // URL DA PLANILHA
     // =========================================================
 
-    function urlPlanilha() {
+    function criarURL() {
 
         return (
             "https://docs.google.com/spreadsheets/d/" +
@@ -65,192 +78,240 @@
 
 
     // =========================================================
-    // VERIFICAR PLANILHA
+    // VERIFICAR CONTROLE
     // =========================================================
 
-    async function verificar() {
+    function verificar() {
 
         if (verificando) {
-            return ativo;
+            return;
         }
 
         verificando = true;
 
-        try {
 
-            console.log(
-                "[CONTROLE GLOBAL] Verificando planilha..."
-            );
+        console.log(
+            "[CONTROLE GLOBAL] Verificando B1..."
+        );
 
 
-            const resposta = await fetch(
-                urlPlanilha(),
-                {
-                    method: "GET",
-                    cache: "no-store"
+        GM_xmlhttpRequest({
+
+            method: "GET",
+
+            url: criarURL(),
+
+            timeout: 10000,
+
+
+            onload: function (resposta) {
+
+                try {
+
+                    if (
+                        resposta.status < 200 ||
+                        resposta.status >= 300
+                    ) {
+
+                        throw new Error(
+                            "HTTP " +
+                            resposta.status
+                        );
+
+                    }
+
+
+                    const texto =
+                        resposta.responseText;
+
+
+                    // =================================================
+                    // LOCALIZA JSON
+                    // =================================================
+
+                    const inicio =
+                        texto.indexOf("{");
+
+                    const fim =
+                        texto.lastIndexOf("}");
+
+
+                    if (
+                        inicio === -1 ||
+                        fim === -1
+                    ) {
+
+                        throw new Error(
+                            "Resposta do Google inválida."
+                        );
+
+                    }
+
+
+                    const dados =
+                        JSON.parse(
+                            texto.substring(
+                                inicio,
+                                fim + 1
+                            )
+                        );
+
+
+                    // =================================================
+                    // PRIMEIRA LINHA
+                    // =================================================
+
+                    const linha =
+                        dados?.table?.rows?.[0];
+
+
+                    if (!linha) {
+
+                        throw new Error(
+                            "Não foi possível encontrar B1."
+                        );
+
+                    }
+
+
+                    // =================================================
+                    // B1
+                    // =================================================
+
+                    const valorB1 =
+                        linha.c?.[1]?.v ?? "";
+
+
+                    const status =
+                        String(valorB1)
+                            .trim()
+                            .toLowerCase();
+
+
+                    // =================================================
+                    // ATIVO
+                    // =================================================
+
+                    if (status === "ativo") {
+
+                        ativo = true;
+
+                        estadoConfirmado = true;
+
+
+                        removerAviso();
+
+
+                        console.log(
+                            "%c[CONTROLE GLOBAL] 🟢 ATIVO",
+                            "color: green; font-weight: bold;"
+                        );
+
+                    }
+
+
+                    // =================================================
+                    // INATIVO
+                    // =================================================
+
+                    else {
+
+                        ativo = false;
+
+                        estadoConfirmado = true;
+
+
+                        mostrarAviso();
+
+
+                        console.warn(
+                            "[CONTROLE GLOBAL] 🔴 INATIVO"
+                        );
+
+                    }
+
+
                 }
-            );
+
+                catch (erro) {
+
+                    tratarErro(erro);
+
+                }
 
 
-            if (!resposta.ok) {
+                finally {
 
-                throw new Error(
-                    `HTTP ${resposta.status}`
-                );
+                    verificando = false;
 
-            }
+                }
 
-
-            const texto =
-                await resposta.text();
+            },
 
 
-            // =================================================
-            // EXTRAI JSON DO GOOGLE
-            // =================================================
+            onerror: function () {
 
-            const inicio =
-                texto.indexOf("{");
-
-            const fim =
-                texto.lastIndexOf("}");
-
-
-            if (
-                inicio === -1 ||
-                fim === -1
-            ) {
-
-                throw new Error(
-                    "Resposta da planilha inválida."
-                );
-
-            }
-
-
-            const dados =
-                JSON.parse(
-                    texto.substring(
-                        inicio,
-                        fim + 1
+                tratarErro(
+                    new Error(
+                        "Falha de conexão com o Google."
                     )
                 );
 
-
-            // =================================================
-            // PRIMEIRA LINHA DA PLANILHA
-            // =================================================
-
-            const linha =
-                dados?.table?.rows?.[0];
+            },
 
 
-            if (!linha) {
+            ontimeout: function () {
 
-                throw new Error(
-                    "B1 não encontrado."
+                tratarErro(
+                    new Error(
+                        "Timeout ao consultar Google Sheets."
+                    )
                 );
 
             }
 
-
-            // =================================================
-            // B1
-            // =================================================
-
-            const valorB1 =
-                linha.c?.[1]?.v ?? "";
-
-
-            const status =
-                String(valorB1)
-                    .trim()
-                    .toLowerCase();
-
-
-            // =================================================
-            // ATUALIZA ESTADO
-            // =================================================
-
-            if (status === "ativo") {
-
-                ativo = true;
-
-                estadoConfirmado = true;
-
-                removerAvisoEstado();
-
-                console.log(
-                    "%c[CONTROLE GLOBAL] ATIVO",
-                    "color: green; font-weight: bold;"
-                );
-
-            }
-
-            else {
-
-                ativo = false;
-
-                estadoConfirmado = true;
-
-                mostrarAviso();
-
-                console.warn(
-                    "[CONTROLE GLOBAL] INATIVO"
-                );
-
-            }
-
-
-            return ativo;
-
-
-        }
-
-        catch (erro) {
-
-
-            console.warn(
-                "[CONTROLE GLOBAL] Erro ao verificar planilha:",
-                erro
-            );
-
-
-            // =================================================
-            // FALHA TEMPORÁRIA
-            // =================================================
-
-            if (
-                !CONFIG.MANTER_ULTIMO_ESTADO_EM_ERRO
-            ) {
-
-                ativo = false;
-
-                mostrarAviso();
-
-            }
-
-
-            return ativo;
-
-
-        }
-
-        finally {
-
-            verificando = false;
-
-        }
+        });
 
     }
 
 
     // =========================================================
-    // AVISO
+    // TRATAMENTO DE ERRO
+    // =========================================================
+
+    function tratarErro(erro) {
+
+        console.warn(
+            "[CONTROLE GLOBAL] ⚠️ Erro:",
+            erro
+        );
+
+
+        if (
+            !CONFIG.MANTER_ULTIMO_ESTADO_EM_ERRO
+        ) {
+
+            ativo = false;
+
+            estadoConfirmado = true;
+
+            mostrarAviso();
+
+        }
+
+
+        verificando = false;
+
+    }
+
+
+    // =========================================================
+    // MOSTRAR AVISO
     // =========================================================
 
     function mostrarAviso() {
 
+        // Só um aviso por aba.
         if (
             sessionStorage.getItem(
                 AVISO_KEY
@@ -277,10 +338,10 @@
 
 
     // =========================================================
-    // REMOVE ESTADO DO AVISO
+    // REMOVER AVISO
     // =========================================================
 
-    function removerAvisoEstado() {
+    function removerAviso() {
 
         sessionStorage.removeItem(
             AVISO_KEY
@@ -290,13 +351,13 @@
 
 
     // =========================================================
-    // PODE EXECUTAR?
+    // VERIFICAR SE PODE EXECUTAR
     // =========================================================
 
     function podeExecutar() {
 
         return (
-            estadoConfirmado &&
+            estadoConfirmado === true &&
             ativo === true
         );
 
@@ -304,7 +365,7 @@
 
 
     // =========================================================
-    // API GLOBAL
+    // API PÚBLICA
     // =========================================================
 
     window.ControleGlobal = {
