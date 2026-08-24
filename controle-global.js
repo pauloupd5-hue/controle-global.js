@@ -1,17 +1,3 @@
-// ==UserScript==
-// @name         Controle Global Tampermonkey
-// @namespace    Saynity
-// @version      1.0.0
-// @description  Controle global de ativação dos Tampermonkeys através do Google Sheets
-// @grant        GM_xmlhttpRequest
-// @connect      docs.google.com
-// ==/UserScript==
-
-
-// ============================================================
-// CONTROLE GLOBAL DOS TAMPERMONKEYS
-// ============================================================
-
 (function () {
 
     "use strict";
